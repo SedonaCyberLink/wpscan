@@ -27,6 +27,7 @@ banner()
 
 begin
   wpscan_options = WpscanOptions.load_from_arguments
+  formatter      = ConsoleFormatter.new
 
   unless wpscan_options.has_options?
     raise "No argument supplied\n#{usage()}"
@@ -40,10 +41,10 @@ begin
   # Check for updates
   if wpscan_options.update
     unless @updater.nil?
-      puts @updater.update()
+      puts formatter.updater_update(@updater.update())
     else
-      puts "Svn / Git not installed, or wpscan has not been installed with one of them."
-      puts "Update aborted"
+      puts formatter.updater_not_available
+      puts formatter.update_aborted
     end
     exit(1)
   end
@@ -57,18 +58,17 @@ begin
 
   if redirection = wp_target.redirection
     if wpscan_options.follow_redirection
-      puts "Following redirection #{redirection}"
-      puts
+      puts formatter.following_redirection(redirection)
     else
-      puts "The remote host tried to redirect us to #{redirection}"
-      puts "Do you want follow the redirection ? [y/n]"
+      puts formatter.redirection_detected(redirection)
+      puts formatter.question("Do you want follow the redirection ? [y/n]") if formatter.has_user_interaction?
     end
 
-    if wpscan_options.follow_redirection or Readline.readline =~ /^y/i
+    if wpscan_options.follow_redirection or (formatter.has_user_interaction? and Readline.readline =~ /^y/i)
       wpscan_options.url = redirection
       wp_target = WpTarget.new(redirection, wpscan_options.to_h)
     else
-      puts "Scan aborted"
+      puts formatter.scan_aborted
       exit
     end
   end
@@ -87,74 +87,68 @@ begin
   end
 
   # Output runtime data
-  puts "| URL: #{wp_target.url}"
-  puts "| Started on #{Time.now.asctime}"
-  puts
+  puts formatter.start_message(wp_target.url, Time.now)
 
   # Can we identify the theme name?
   if wp_theme = wp_target.theme
-    theme_version = wp_theme.version
-    puts "[!] The WordPress theme in use is #{wp_theme}"
+    puts formatter.theme(wp_theme.name, wp_theme.version)
 
     theme_vulnerabilities = wp_theme.vulnerabilities
     unless theme_vulnerabilities.empty?
-      puts "[+] We have identified #{theme_vulnerabilities.size} vulnerabilities for this theme :"
+      puts formatter.number_of_theme_vulnerabilities(theme_vulnerabilities.size)
+
       theme_vulnerabilities.each do |vulnerability|
-        puts
-        puts " | * Title: " + vulnerability.title
-        puts " | * Reference: " + vulnerability.reference
+        puts formatter.theme_vulnerability(vulnerability)
       end
-      puts
+      puts formatter.theme_vulnerabilities_separator if formatter.theme_vulnerabilities_separator
     end
   end
 
   # Is the readme.html file there?
   if wp_target.has_readme?
-    puts "[!] The WordPress '#{wp_target.readme_url}' file exists"
+    puts formatter.readme_url(wp_target.readme_url)
   end
 
   # Full Path Disclosure (FPD)?
   if wp_target.has_full_path_disclosure?
-    puts "[!] Full Path Disclosure (FPD) in '#{wp_target.full_path_disclosure_url}'"
+    puts formatter.full_path_disclosure_url(wp_target.full_path_disclosure_url)
   end
 
   # Is the wp-config.php file backed up?
   wp_target.config_backup.each do |file_url|
-    puts "[!] A wp-config.php backup file has been found '#{file_url}'"
+    puts formatter.config_file_url(file_url)
   end
 
   # Checking for malwares
   if wp_target.has_malwares?
     malwares = wp_target.malwares
-    puts "[!] #{malwares.size} malware(s) found :"
+    puts formatter.number_of_malwares_found(malwares.size)
 
     malwares.each do |malware_url|
-      puts
-      puts " | " + malware_url
+      puts formatter.malware_url(malware_url)
     end
-    puts
+    puts formatter.malwares_separator if formatter.malwares_separator
   end
 
   # Checking the version...
   if wp_version = wp_target.version
-    puts "[!] WordPress version #{wp_version.number} identified from #{wp_version.discovery_method}"
+    puts formatter.version(wp_version.number, wp_version.discovery_method)
 
     # Are there any vulnerabilities associated with this version?
     version_vulnerabilities = wp_version.vulnerabilities
 
     unless version_vulnerabilities.empty?
-      puts
-      puts "[+] We have identified #{version_vulnerabilities.size} vulnerabilities from the version number :"
+      puts formatter.number_of_version_vulnerabilities(version_vulnerabilities.size)
+
       version_vulnerabilities.each do |vulnerability|
-        puts
-        puts " | * Title: " + vulnerability.title
-        puts " | * Reference: " + vulnerability.reference
+        puts formatter.version_vulnerability(vulnerability)
       end
+      puts formatter.version_vulnerabilities_separator if formatter.version_vulnerabilities_separator
     end
   end
 
   # Plugins from passive detection
-  puts
+  #puts
   print "[+] Enumerating plugins from passive detection ... "
 
   plugins = wp_target.plugins_from_passive_detection

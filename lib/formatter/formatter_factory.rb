@@ -17,7 +17,7 @@
 
 class FormatterFactory
 
-  def self.create_from_name(name)
+  def self.create_from_name(name, options = {})
 
   end
 
